@@ -3,31 +3,100 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Monitor de Alagamentos Rio 3D</title>
+<title>Monitor de Alagamentos · Rio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
 <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
 <style>
-  html, body, #mapa { height: 100%; margin: 0; }
-  .painel { position: absolute; z-index: 1; background: rgba(255,255,255,.92);
-    padding: 10px 14px; border-radius: 10px; font: 14px system-ui, sans-serif;
-    box-shadow: 0 2px 8px rgba(0,0,0,.25); }
-  #info { top: 10px; left: 10px; }
-  #legenda { bottom: 30px; left: 10px; }
-  .cor { display: inline-block; width: 12px; height: 12px; border-radius: 3px;
-    margin-right: 6px; vertical-align: middle; }
+:root {
+  --painel: rgba(15, 23, 42, .72);
+  --borda: rgba(148, 163, 184, .18);
+  --texto: #e2e8f0;
+  --suave: #94a3b8;
+  --baixo: #22c55e; --moderado: #f59e0b; --alto: #ef4444;
+}
+body.claro {
+  --painel: rgba(255, 255, 255, .80);
+  --borda: rgba(15, 23, 42, .10);
+  --texto: #0f172a;
+  --suave: #475569;
+  background: #dbeafe;
+}
+* { box-sizing: border-box; }
+html, body, #mapa { height: 100%; margin: 0; }
+body { font-family: 'Inter', system-ui, sans-serif; color: var(--texto); background: #0b1020; }
+.painel { position: absolute; z-index: 2; background: var(--painel); color: var(--texto);
+  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  border: 1px solid var(--borda); border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,.35); }
+#topo { top: 16px; left: 16px; width: 300px; padding: 18px 20px; }
+h1 { font-size: 17px; font-weight: 700; margin: 0 0 6px; letter-spacing: -.01em; }
+.status { font-size: 12px; color: var(--suave); display: flex; align-items: center; gap: 8px; }
+.pulso { width: 8px; height: 8px; border-radius: 50%; background: var(--baixo); animation: pulso 2s infinite; }
+@keyframes pulso { 0% { opacity: 1; transform: scale(1); } 50% { opacity: .4; transform: scale(1.5); } 100% { opacity: 1; transform: scale(1); } }
+.contagem { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 16px 0 14px; }
+.card { border-radius: 12px; padding: 10px 6px; text-align: center; background: rgba(148,163,184,.08); border: 1px solid var(--borda); }
+.card b { display: block; font-size: 22px; font-weight: 700; }
+.card span { font-size: 10px; color: var(--suave); text-transform: uppercase; letter-spacing: .06em; }
+.subtitulo { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--suave); margin: 0 0 6px; }
+#ranking { list-style: none; padding: 0; margin: 0; }
+#ranking li { display: flex; align-items: center; gap: 10px; padding: 7px 8px; border-radius: 10px; cursor: pointer; font-size: 13px; }
+#ranking li:hover { background: rgba(148,163,184,.14); }
+.bolinha { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+#ranking .nome { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#ranking .mm { font-variant-numeric: tabular-nums; color: var(--suave); }
+#tema { top: 16px; right: 56px; width: 42px; height: 42px; cursor: pointer; font-size: 18px; padding: 0; }
+.aviso { bottom: 16px; left: 16px; padding: 9px 14px; font-size: 11px; color: var(--suave); max-width: 300px; border-radius: 12px; }
+.maplibregl-popup-content { background: var(--painel); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  color: var(--texto); border-radius: 14px; padding: 14px 16px; font-family: 'Inter', sans-serif;
+  box-shadow: 0 10px 30px rgba(0,0,0,.35); border: 1px solid var(--borda); }
+.maplibregl-popup-tip { display: none; }
+.maplibregl-popup-close-button { color: var(--suave); font-size: 18px; padding: 2px 8px; }
+.pop h3 { margin: 0 0 8px; font-size: 15px; padding-right: 16px; }
+.pop .linha { display: flex; justify-content: space-between; gap: 16px; font-size: 13px; margin: 3px 0; }
+.pop .linha span { color: var(--suave); }
+.barra { height: 6px; border-radius: 3px; background: rgba(148,163,184,.25); margin-top: 10px; overflow: hidden; }
+.barra div { height: 100%; border-radius: 3px; }
+.etiqueta { display: inline-block; margin-top: 10px; padding: 3px 10px; border-radius: 999px; font-size: 11px;
+  font-weight: 600; color: #fff; text-transform: uppercase; letter-spacing: .05em; }
+@media (max-width: 600px) {
+  #topo { width: calc(100% - 32px); padding: 14px 16px; }
+  #ranking, .subtitulo, .aviso { display: none; }
+  #tema { top: auto; bottom: 24px; right: 16px; }
+}
 </style>
 </head>
 <body>
 <div id="mapa"></div>
-<div id="info" class="painel"><b>Monitor de Alagamentos Rio</b><br><span id="status">Carregando…</span></div>
-<div id="legenda" class="painel">
-  <div><span class="cor" style="background:#2e7d32"></span>Baixo</div>
-  <div><span class="cor" style="background:#f9a825"></span>Moderado</div>
-  <div><span class="cor" style="background:#c62828"></span>Alto</div>
-  <div style="margin-top:6px;font-size:12px;color:#555">Altura da coluna: chuva da última hora<br>em relação ao limiar da estação</div>
+<div id="topo" class="painel">
+  <h1>🌧️ Alagamentos · Rio</h1>
+  <div class="status"><span class="pulso" id="pulso"></span><span id="status">Carregando…</span></div>
+  <div class="contagem">
+    <div class="card"><b id="n-baixo" style="color:var(--baixo)">–</b><span>Baixo</span></div>
+    <div class="card"><b id="n-moderado" style="color:var(--moderado)">–</b><span>Moderado</span></div>
+    <div class="card"><b id="n-alto" style="color:var(--alto)">–</b><span>Alto</span></div>
+  </div>
+  <p class="subtitulo">Mais chuva na última hora</p>
+  <ul id="ranking"></ul>
 </div>
+<button id="tema" class="painel" title="Alternar tema claro/escuro">☀️</button>
+<div class="aviso painel">Projeto independente, sem vínculo oficial. Em emergências, siga a Defesa Civil.</div>
 <script>
-const CORES = { baixo: '#2e7d32', moderado: '#f9a825', alto: '#c62828' };
+const CORES = { baixo: '#22c55e', moderado: '#f59e0b', alto: '#ef4444' };
+const ROTULO = { baixo: 'Baixo', moderado: 'Moderado', alto: 'Alto' };
+const CEU = {
+  escuro: { 'sky-color': '#0b1020', 'horizon-color': '#1e3a5f', 'fog-color': '#0b1020',
+            'sky-horizon-blend': 0.6, 'horizon-fog-blend': 0.6, 'fog-ground-blend': 0.9, 'atmosphere-blend': 0.5 },
+  claro:  { 'sky-color': '#7cc4ff', 'horizon-color': '#eaf6ff', 'fog-color': '#ffffff',
+            'sky-horizon-blend': 0.6, 'horizon-fog-blend': 0.6, 'fog-ground-blend': 0.9, 'atmosphere-blend': 0.5 }
+};
+const urls = estilo => ['a', 'b', 'c'].map(s => `https://${s}.basemaps.cartocdn.com/${estilo}/{z}/{x}/{y}@2x.png`);
+const RELEVO = ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'];
+const vazio = () => ({ type: 'FeatureCollection', features: [] });
+let ESTACOES = [];
+let tema = 'escuro';
+let girando = true;
+let hoverId = null;
 
 function circulo(lon, lat, raioM, lados) {
   const pts = [];
@@ -40,75 +109,132 @@ function circulo(lon, lat, raioM, lados) {
   return [pts];
 }
 
-function paraGeoJSON(estacoes) {
-  return {
-    type: 'FeatureCollection',
-    features: estacoes.map(e => ({
-      type: 'Feature',
-      geometry: { type: 'Polygon', coordinates: circulo(e.lon, e.lat, 300, 24) },
-      properties: {
-        nome: e.nome, acumulado: e.acumulado, limiar: e.limiar, risco: e.risco,
-        cor: CORES[e.risco] || '#888888',
-        altura: 100 + Math.min(e.acumulado / e.limiar, 1.5) * 1500
-      }
-    }))
-  };
-}
-
 const map = new maplibregl.Map({
   container: 'mapa',
   style: {
     version: 8,
     sources: {
-      osm: { type: 'raster', tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
-             tileSize: 256, attribution: '© OpenStreetMap' },
-      relevo: { type: 'raster-dem', encoding: 'terrarium', tileSize: 256, maxzoom: 15,
-                tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'] },
-      sombra: { type: 'raster-dem', encoding: 'terrarium', tileSize: 256, maxzoom: 15,
-                tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'] }
+      escuro: { type: 'raster', tiles: urls('dark_all'), tileSize: 256, attribution: '© OpenStreetMap © CARTO' },
+      claro:  { type: 'raster', tiles: urls('light_all'), tileSize: 256, attribution: '© OpenStreetMap © CARTO' },
+      relevo: { type: 'raster-dem', encoding: 'terrarium', tileSize: 256, maxzoom: 15, tiles: RELEVO },
+      sombra: { type: 'raster-dem', encoding: 'terrarium', tileSize: 256, maxzoom: 15, tiles: RELEVO }
     },
     layers: [
-      { id: 'osm', type: 'raster', source: 'osm' },
-      { id: 'sombra', type: 'hillshade', source: 'sombra', paint: { 'hillshade-exaggeration': 0.5 } }
+      { id: 'base-escuro', type: 'raster', source: 'escuro' },
+      { id: 'base-claro', type: 'raster', source: 'claro', layout: { visibility: 'none' } },
+      { id: 'sombra', type: 'hillshade', source: 'sombra',
+        paint: { 'hillshade-exaggeration': 0.35, 'hillshade-shadow-color': '#000000', 'hillshade-highlight-color': '#ffffff' } }
     ],
-    terrain: { source: 'relevo', exaggeration: 1.5 }
+    terrain: { source: 'relevo', exaggeration: 1.8 }
   },
-  center: [-43.35, -22.93], zoom: 10.5, pitch: 60, bearing: -20, maxPitch: 85
+  center: [-43.38, -22.95], zoom: 10.6, pitch: 62, bearing: -25, maxPitch: 85,
+  attributionControl: { compact: true }
 });
-map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }));
+map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right');
+const popup = new maplibregl.Popup({ offset: 12, maxWidth: '290px' });
+
+function popupHTML(p) {
+  const pct = Math.min(100, Math.round(p.acumulado / p.limiar * 100));
+  const cor = CORES[p.risco] || '#94a3b8';
+  return `<div class="pop"><h3>${p.nome}</h3>
+    <div class="linha"><span>Chuva na última hora</span><b>${p.acumulado} mm</b></div>
+    <div class="linha"><span>Limiar da estação</span><b>${p.limiar} mm</b></div>
+    <div class="barra"><div style="width:${pct}%;background:${cor}"></div></div>
+    <span class="etiqueta" style="background:${cor}">Risco ${ROTULO[p.risco] || ''}</span></div>`;
+}
+function abrirPopup(p, lngLat) { popup.setLngLat(lngLat).setHTML(popupHTML(p)).addTo(map); }
+
+function girar() {
+  if (!girando) return;
+  map.rotateTo((map.getBearing() + 6) % 360, { duration: 3000, easing: t => t });
+}
+function pararGiro() { girando = false; }
+['mousedown', 'touchstart', 'wheel'].forEach(t => map.getCanvas().addEventListener(t, pararGiro, { passive: true }));
+map.on('moveend', () => { if (girando) girar(); });
 
 async function atualizar() {
   try {
     const d = await (await fetch('api/risco')).json();
-    const validas = d.estacoes.filter(e => e.lat != null && e.lon != null);
-    map.getSource('estacoes').setData(paraGeoJSON(validas));
+    ESTACOES = d.estacoes.filter(e => e.lat != null && e.lon != null);
+    map.getSource('colunas').setData({
+      type: 'FeatureCollection',
+      features: ESTACOES.map(e => ({
+        type: 'Feature',
+        geometry: { type: 'Polygon', coordinates: circulo(e.lon, e.lat, 220, 48) },
+        properties: { ...e, cor: CORES[e.risco] || '#94a3b8',
+                      altura: 60 + Math.min(e.acumulado / e.limiar, 1.5) * 1800 }
+      }))
+    });
+    map.getSource('pontos').setData({
+      type: 'FeatureCollection',
+      features: ESTACOES.map(e => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [e.lon, e.lat] },
+                                     properties: { cor: CORES[e.risco] || '#94a3b8' } }))
+    });
+    const n = { baixo: 0, moderado: 0, alto: 0 };
+    ESTACOES.forEach(e => { if (e.risco in n) n[e.risco]++; });
+    for (const k in n) document.getElementById('n-' + k).textContent = n[k];
+    document.getElementById('pulso').style.background = n.alto ? CORES.alto : n.moderado ? CORES.moderado : CORES.baixo;
+    const top = [...ESTACOES].sort((a, b) => b.acumulado - a.acumulado).slice(0, 5);
+    document.getElementById('ranking').innerHTML = top.map(e =>
+      `<li data-id="${e.id}"><span class="bolinha" style="background:${CORES[e.risco]}"></span>` +
+      `<span class="nome">${e.nome}</span><span class="mm">${e.acumulado} mm</span></li>`).join('');
     document.getElementById('status').textContent = `Atualizado às ${d.atualizado} · ${d.modo}`;
   } catch (err) {
     document.getElementById('status').textContent = 'Erro ao carregar dados';
   }
 }
 
+document.getElementById('ranking').addEventListener('click', ev => {
+  const li = ev.target.closest('li');
+  if (!li) return;
+  const e = ESTACOES.find(x => String(x.id) === li.dataset.id);
+  if (!e) return;
+  pararGiro();
+  map.flyTo({ center: [e.lon, e.lat], zoom: 13.5, pitch: 65, duration: 2200, essential: true });
+  map.once('moveend', () => abrirPopup(e, [e.lon, e.lat]));
+});
+
+document.getElementById('tema').addEventListener('click', () => {
+  tema = tema === 'escuro' ? 'claro' : 'escuro';
+  document.body.classList.toggle('claro', tema === 'claro');
+  map.setLayoutProperty('base-escuro', 'visibility', tema === 'escuro' ? 'visible' : 'none');
+  map.setLayoutProperty('base-claro', 'visibility', tema === 'claro' ? 'visible' : 'none');
+  try { map.setSky(CEU[tema]); } catch (e) {}
+  document.getElementById('tema').textContent = tema === 'escuro' ? '☀️' : '🌙';
+});
+
 map.on('load', async () => {
-  map.addSource('estacoes', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
-  map.addLayer({
-    id: 'colunas', type: 'fill-extrusion', source: 'estacoes',
-    paint: {
-      'fill-extrusion-color': ['get', 'cor'],
-      'fill-extrusion-height': ['get', 'altura'],
-      'fill-extrusion-base': 0,
-      'fill-extrusion-opacity': 0.85
-    }
+  try { map.setSky(CEU.escuro); } catch (e) {}
+  map.addSource('colunas', { type: 'geojson', data: vazio(), promoteId: 'id' });
+  map.addSource('pontos', { type: 'geojson', data: vazio() });
+  map.addLayer({ id: 'brilho', type: 'circle', source: 'pontos', paint: {
+    'circle-radius': ['interpolate', ['linear'], ['zoom'], 9, 12, 14, 48],
+    'circle-color': ['get', 'cor'], 'circle-blur': 1, 'circle-opacity': 0.55,
+    'circle-pitch-alignment': 'map' } });
+  map.addLayer({ id: 'colunas', type: 'fill-extrusion', source: 'colunas', paint: {
+    'fill-extrusion-color': ['case', ['boolean', ['feature-state', 'hover'], false], '#ffffff', ['get', 'cor']],
+    'fill-extrusion-height': ['get', 'altura'],
+    'fill-extrusion-base': 0,
+    'fill-extrusion-opacity': 0.92,
+    'fill-extrusion-vertical-gradient': true } });
+
+  map.on('mousemove', 'colunas', ev => {
+    map.getCanvas().style.cursor = 'pointer';
+    const id = ev.features[0].id;
+    if (hoverId !== null && hoverId !== id) map.setFeatureState({ source: 'colunas', id: hoverId }, { hover: false });
+    hoverId = id;
+    map.setFeatureState({ source: 'colunas', id }, { hover: true });
   });
-  map.on('click', 'colunas', ev => {
-    const p = ev.features[0].properties;
-    new maplibregl.Popup().setLngLat(ev.lngLat)
-      .setHTML(`<b>${p.nome}</b><br>Chuva na última hora: ${p.acumulado} mm<br>Limiar: ${p.limiar} mm<br>Risco: ${p.risco}`)
-      .addTo(map);
+  map.on('mouseleave', 'colunas', () => {
+    map.getCanvas().style.cursor = '';
+    if (hoverId !== null) map.setFeatureState({ source: 'colunas', id: hoverId }, { hover: false });
+    hoverId = null;
   });
-  map.on('mouseenter', 'colunas', () => { map.getCanvas().style.cursor = 'pointer'; });
-  map.on('mouseleave', 'colunas', () => { map.getCanvas().style.cursor = ''; });
+  map.on('click', 'colunas', ev => { pararGiro(); abrirPopup(ev.features[0].properties, ev.lngLat); });
+
   await atualizar();
   setInterval(atualizar, 60000);
+  girar();
 });
 </script>
 </body>

@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Monitor de Alagamentos · Rio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+:root {
+  --painel: rgba(15, 23, 42, .78);
+  --borda: rgba(148, 163, 184, .18);
+  --texto: #e2e8f0;
+  --suave: #94a3b8;
+  --baixo: #22c55e; --moderado: #f59e0b; --alto: #ef4444;
+}
+body.claro {
+  --painel: rgba(255, 255, 255, .85);
+  --borda: rgba(15, 23, 42, .10);
+  --texto: #0f172a;
+  --suave: #475569;
+}
+* { box-sizing: border-box; }
+html, body, #mapa { height: 100%; margin: 0; }
+body { font-family: 'Inter', system-ui, sans-serif; color: var(--texto); }
+#mapa { background: #0b1020; }
+body.claro #mapa { background: #aad3df; }
+body:not(.claro) .leaflet-tile-pane {
+  filter: invert(1) hue-rotate(180deg) brightness(.9) contrast(.9) saturate(.5);
+}
+.painel { position: absolute; z-index: 1000; background: var(--painel); color: var(--texto);
+  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  border: 1px solid var(--borda); border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,.35); }
+#topo { top: 16px; left: 16px; width: 300px; padding: 18px 20px; }
+h1 { font-size: 17px; font-weight: 700; margin: 0 0 6px; letter-spacing: -.01em; }
+.status { font-size: 12px; color: var(--suave); display: flex; align-items: center; gap: 8px; }
+.pulso { width: 8px; height: 8px; border-radius: 50%; background: var(--baixo); flex: none; animation: pulso 2s infinite; }
+@keyframes pulso { 50% { opacity: .4; transform: scale(1.5); } }
+.contagem { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 16px 0 14px; }
+.card { border-radius: 12px; padding: 10px 6px; text-align: center; background: rgba(148,163,184,.08); border: 1px solid var(--borda); }
+.card b { display: block; font-size: 22px; font-weight: 700; }
+.card span { font-size: 10px; color: var(--suave); text-transform: uppercase; letter-spacing: .06em; }
+.subtitulo { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--suave); margin: 0 0 6px; }
+#ranking { list-style: none; padding: 0; margin: 0; }
+#ranking li { display: flex; align-items: center; gap: 10px; padding: 7px 8px; border-radius: 10px; cursor: pointer; font-size: 13px; }
+#ranking li:hover { background: rgba(148,163,184,.14); }
+.bolinha { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+#ranking .nome { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#ranking .mm { font-variant-numeric: tabular-nums; color: var(--suave); }
+#tema { top: 16px; right: 16px; width: 42px; height: 42px; cursor: pointer; font-size: 18px; padding: 0; }
+.aviso { bottom: 16px; left: 16px; padding: 9px 14px; font-size: 11px; color: var(--suave); max-width: 300px; border-radius: 12px; }
+.risco-baixo { filter: drop-shadow(0 0 5px rgba(34,197,94,.9)); }
+.risco-moderado { filter: drop-shadow(0 0 7px rgba(245,158,11,.95)); }
+.risco-alto { filter: drop-shadow(0 0 10px rgba(239,68,68,1)); }
+.leaflet-popup-content-wrapper, .leaflet-tooltip { background: var(--painel); color: var(--texto);
+  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  border: 1px solid var(--borda); border-radius: 14px; box-shadow: 0 10px 30px rgba(0,0,0,.35); }
+.leaflet-tooltip { font-family: 'Inter', sans-serif; font-size: 12px; font-weight: 600; padding: 5px 10px; border-radius: 8px; }
+.leaflet-tooltip-top:before { border-top-color: var(--painel); }
+.leaflet-popup-tip { background: var(--painel); }
+.leaflet-popup-content { margin: 14px 16px; font-family: 'Inter', sans-serif; }
+.leaflet-container a.leaflet-popup-close-button { color: var(--suave); }
+.leaflet-control-zoom a { background: var(--painel) !important; color: var(--texto) !important; border-color: var(--borda) !important; }
+.leaflet-control-attribution { background: var(--painel) !important; color: var(--suave); }
+.leaflet-control-attribution a { color: var(--suave); }
+.pop h3 { margin: 0 0 8px; font-size: 15px; padding-right: 16px; }
+.pop .linha { display: flex; justify-content: space-between; gap: 16px; font-size: 13px; margin: 3px 0; }
+.pop .linha span { color: var(--suave); }
+.barra { height: 6px; border-radius: 3px; background: rgba(148,163,184,.25); margin-top: 10px; overflow: hidden; }
+.barra div { height: 100%; border-radius: 3px; }
+.etiqueta { display: inline-block; margin-top: 10px; padding: 3px 10px; border-radius: 999px; font-size: 11px;
+  font-weight: 600; color: #fff; text-transform: uppercase; letter-spacing: .05em; }
+@media (max-width: 600px) {
+  #topo { width: calc(100% - 80px); padding: 14px 16px; }
+  #ranking, .subtitulo, .aviso { display: none; }
+}
+</style>
+</head>
+<body>
+<div id="mapa"></div>
+<div id="topo" class="painel">
+  <h1>🌧️ Alagamentos · Rio</h1>
+  <div class="status"><span class="pulso" id="pulso"></span><span id="status">Carregando…</span></div>
+  <div class="contagem">
+    <div class="card"><b id="n-baixo" style="color:var(--baixo)">–</b><span>Baixo</span></div>
+    <div class="card"><b id="n-moderado" style="color:var(--moderado)">–</b><span>Moderado</span></div>
+    <div class="card"><b id="n-alto" style="color:var(--alto)">–</b><span>Alto</span></div>
+  </div>
+  <p class="subtitulo">Mais chuva na última hora</p>
+  <ul id="ranking"></ul>
+</div>
+<button id="tema" class="painel" title="Alternar tema claro/escuro">☀️</button>
+<div class="aviso painel">Projeto independente, sem vínculo oficial. Em emergências, siga a Defesa Civil.</div>
+<script>
+const CORES = { baixo: '#22c55e', moderado: '#f59e0b', alto: '#ef4444' };
+const ROTULO = { baixo: 'Baixo', moderado: 'Moderado', alto: 'Alto' };
+let ESTACOES = [];
+let primeiraVez = true;
+let tema = 'escuro';
+const marcadores = {};
+
+const map = L.map('mapa', { zoomControl: false }).setView([-22.93, -43.40], 11);
+L.control.zoom({ position: 'bottomright' }).addTo(map);
+L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 19, attribution: '© OpenStreetMap'
+}).addTo(map);
+const camada = L.layerGroup().addTo(map);
+
+function popupHTML(p) {
+  const pct = Math.min(100, Math.round(p.acumulado / p.limiar * 100));
+  const cor = CORES[p.risco] || '#94a3b8';
+  return `<div class="pop"><h3>${p.nome}</h3>
+    <div class="linha"><span>Chuva na última hora</span><b>${p.acumulado} mm</b></div>
+    <div class="linha"><span>Limiar da estação</span><b>${p.limiar} mm</b></div>
+    <div class="barra"><div style="width:${pct}%;background:${cor}"></div></div>
+    <span class="etiqueta" style="background:${cor}">Risco ${ROTULO[p.risco] || ''}</span></div>`;
+}
+
+async function atualizar() {
+  try {
+    const d = await (await fetch('api/risco')).json();
+    ESTACOES = d.estacoes.filter(e => e.lat != null && e.lon != null);
+    camada.clearLayers();
+    ESTACOES.forEach(e => {
+      const m = L.circleMarker([e.lat, e.lon], {
+        radius: e.risco === 'alto' ? 12 : e.risco === 'moderado' ? 10 : 8,
+        color: '#ffffff', weight: 1.5, opacity: 0.9,
+        fillColor: CORES[e.risco] || '#94a3b8', fillOpacity: 0.95,
+        className: 'risco-' + e.risco
+      });
+      m.bindPopup(popupHTML(e), { maxWidth: 290 });
+      m.bindTooltip(e.nome, { direction: 'top', offset: [0, -8] });
+      m.addTo(camada);
+      marcadores[e.id] = m;
+    });
+    if (primeiraVez && ESTACOES.length) {
+      map.fitBounds(L.latLngBounds(ESTACOES.map(e => [e.lat, e.lon])), {
+        paddingTopLeft: [window.innerWidth > 600 ? 340 : 20, 40], paddingBottomRight: [40, 40]
+      });
+      primeiraVez = false;
+    }
+    const n = { baixo: 0, moderado: 0, alto: 0 };
+    ESTACOES.forEach(e => { if (e.risco in n) n[e.risco]++; });
+    for (const k in n) document.getElementById('n-' + k).textContent = n[k];
+    document.getElementById('pulso').style.background = n.alto ? CORES.alto : n.moderado ? CORES.moderado : CORES.baixo;
+    const top = [...ESTACOES].sort((a, b) => b.acumulado - a.acumulado).slice(0, 5);
+    document.getElementById('ranking').innerHTML = top.map(e =>
+      `<li data-id="${e.id}"><span class="bolinha" style="background:${CORES[e.risco]}"></span>` +
+      `<span class="nome">${e.nome}</span><span class="mm">${e.acumulado} mm</span></li>`).join('');
+    document.getElementById('status').textContent = `Atualizado às ${d.atualizado} · ${d.modo}`;
+  } catch (err) {
+    document.getElementById('status').textContent = 'Erro ao carregar dados. O servidor está ligado?';
+  }
+}
+
+document.getElementById('ranking').addEventListener('click', ev => {
+  const li = ev.target.closest('li');
+  if (!li) return;
+  const e = ESTACOES.find(x => String(x.id) === li.dataset.id);
+  if (!e) return;
+  map.flyTo([e.lat, e.lon], 14, { duration: 1.5 });
+  map.once('moveend', () => { if (marcadores[e.id]) marcadores[e.id].openPopup(); });
+});
+
+document.getElementById('tema').addEventListener('click', () => {
+  tema = tema === 'escuro' ? 'claro' : 'escuro';
+  document.body.classList.toggle('claro', tema === 'claro');
+  document.getElementById('tema').textContent = tema === 'escuro' ? '☀️' : '🌙';
+});
+
+atualizar();
+setInterval(atualizar, 60000);
+</script>
+</body>
+</html>
