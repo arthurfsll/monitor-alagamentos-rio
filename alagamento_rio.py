@@ -119,6 +119,87 @@ def coletar_openmeteo():
                     leituras.append((e["id"], h, float(mm)))
     return leituras
 
+# ---------- Previsão (Open-Meteo, próximas 3 horas) ----------
+def coletar_previsao():
+    import requests
+    with conexao() as c:
+        est = c.execute("SELECT id, lat, lon FROM estacoes WHERE lat IS NOT NULL AND lon IS NOT NULL").fetchall()
+    limite = agora().isoformat()
+    linhas = []
+    for i in range(0, len(est), 50):
+        lote = est[i:i + 50]
+        resp = requests.get("https://api.open-meteo.com/v1/forecast", params={
+            "latitude": ",".join(f"{e['lat']:.4f}" for e in lote),
+            "longitude": ",".join(f"{e['lon']:.4f}" for e in lote),
+            "minutely_15": "precipitation",
+            "forecast_minutely_15": 14,
+            "timezone": "America/Sao_Paulo",
+        }, timeout=30)
+        resp.raise_for_status()
+        dados = resp.json()
+        if isinstance(dados, dict):
+            dados = [dados]
+        for e, d in zip(lote, dados):
+            m = d["minutely_15"]
+            for h, mm in zip(m["time"], m["precipitation"]):
+                h = h if len(h) > 16 else h + ":00"
+                if mm is not None and h > limite:
+                    linhas.append((e["id"], h, float(mm)))
+    with conexao() as c:
+        c.execute("""CREATE TABLE IF NOT EXISTS previsao(
+            estacao_id INTEGER, horario TEXT, mm REAL, PRIMARY KEY (estacao_id, horario))""")
+        c.execute("DELETE FROM previsao")
+        c.executemany("INSERT OR REPLACE INTO previsao VALUES (?,?,?)", linhas)
+    return len(linhas)
+
+def pico_previsto(pontos, agora_iso):
+    """Maior chuva acumulada em 1h nas próximas 3h, e o horário em que acontece."""
+    pontos = sorted(pontos)
+    melhor = (0.0, None)
+    for h, _ in pontos:
+        if h <= agora_iso:
+            continue
+        ini = (datetime.fromisoformat(h) - timedelta(hours=1)).isoformat()
+        soma = sum(mm for hh, mm in pontos if ini < hh <= h)
+        if soma > melhor[0] + 1e-9:
+            melhor = (soma, h)
+    return melhor
+
+def anexar_previsao(estacoes, series, agora_iso):
+    for e in estacoes:
+        soma, h = pico_previsto(series.get(e["id"], []), agora_iso)
+        e["previsto_mm"] = round(soma, 1)
+        e["previsto_hora"] = h[11:16] if h else None
+        e["previsto_risco"] = classificar(soma, e["limiar"])
+    return estacoes
+
+def series_ao_vivo():
+    a = agora()
+    ini, fim, horizonte = (a - timedelta(hours=1)).isoformat(), a.isoformat(), (a + timedelta(hours=3)).isoformat()
+    with conexao() as c:
+        obs = c.execute("SELECT estacao_id, horario, mm FROM leituras WHERE horario > ? AND horario <= ?",
+                        (ini, fim)).fetchall()
+        try:
+            prev = c.execute("SELECT estacao_id, horario, mm FROM previsao WHERE horario > ? AND horario <= ?",
+                             (fim, horizonte)).fetchall()
+        except sqlite3.OperationalError:
+            prev = []
+    series = {}
+    for est, h, mm in [tuple(r) for r in obs] + [tuple(r) for r in prev]:
+        series.setdefault(est, []).append((h, mm))
+    return series, fim
+
+def series_replay(momento):
+    m = datetime.fromisoformat(momento)
+    ini, horizonte = (m - timedelta(hours=1)).isoformat(), (m + timedelta(hours=3)).isoformat()
+    with conexao() as c:
+        rows = c.execute("SELECT estacao_id, horario, mm FROM leituras_replay WHERE horario > ? AND horario <= ?",
+                         (ini, horizonte)).fetchall()
+    series = {}
+    for est, h, mm in [tuple(r) for r in rows]:
+        series.setdefault(est, []).append((h, mm))
+    return series, m.isoformat()
+
 def ciclo_coleta():
     while True:
         try:
@@ -126,6 +207,11 @@ def ciclo_coleta():
             with conexao() as c:
                 c.executemany("INSERT OR REPLACE INTO leituras VALUES (?,?,?)", dados)
             print(f"[{agora():%H:%M}] {len(dados)} leituras salvas")
+            if USAR_OPENMETEO:
+                try:
+                    print(f"[{agora():%H:%M}] {coletar_previsao()} pontos de previsão salvos")
+                except Exception as erro:
+                    print("Falha na previsão:", erro)
         except Exception as erro:
             print("Falha na coleta:", erro)
         time.sleep(INTERVALO_COLETA)
@@ -157,7 +243,7 @@ app = FastAPI(title="Monitor de Alagamentos Rio")
 def api_risco():
     return {"atualizado": f"{agora():%H:%M}",
             "modo": "Open-Meteo (estimativa)" if USAR_OPENMETEO else ("dados reais" if USAR_DADOS_REAIS else "simulação"),
-            "estacoes": risco_atual()}
+            "estacoes": anexar_previsao(risco_atual(), *series_ao_vivo())}
 
 MAPA_HTML = """<!DOCTYPE html>
 <html lang="pt-BR"><head><meta charset="utf-8">
@@ -226,7 +312,7 @@ def api_replay_momentos():
 def api_replay(momento: str):
     return {"atualizado": f"{momento[8:10]}/{momento[5:7]} {momento[11:16]}",
             "modo": "Replay · temporal de 13–14/jan/2024",
-            "estacoes": risco_em(momento)}
+            "estacoes": anexar_previsao(risco_em(momento), *series_replay(momento))}
 
 @app.get("/replay", response_class=HTMLResponse)
 def pagina_replay():

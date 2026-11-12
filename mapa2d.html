@@ -76,6 +76,21 @@ h1 { font-size: 17px; font-weight: 700; margin: 0 0 6px; letter-spacing: -.01em;
   #topo { width: calc(100% - 80px); padding: 14px 16px; }
   #ranking, .subtitulo, .aviso { display: none; }
 }
+#perto-btn { width: 100%; margin-top: 14px; padding: 10px; border-radius: 12px; cursor: pointer;
+  border: 1px solid rgba(59,130,246,.4); background: rgba(59,130,246,.16); color: var(--texto);
+  font: 600 13px 'Inter', system-ui, sans-serif; }
+#perto-btn:hover { background: rgba(59,130,246,.28); }
+#perto { display: none; margin-top: 12px; padding: 12px 14px; border-radius: 12px; font-size: 13px; line-height: 1.45;
+  background: rgba(148,163,184,.08); border: 1px solid var(--borda); border-left: 4px solid var(--baixo); }
+#perto .titulo { display: block; font-size: 14px; margin-bottom: 4px; }
+#perto .dica { color: var(--suave); font-size: 11px; margin-top: 8px; }
+.dica-mapa { font-size: 11px; color: var(--suave); margin-top: 8px; }
+.eu { filter: drop-shadow(0 0 8px rgba(59,130,246,.95)); }
+@media (max-width: 600px) { .dica-mapa { display: none; } }
+.prev-resumo { margin: 0 0 14px; padding: 10px 12px; border-radius: 12px; font-size: 12px;
+  background: rgba(148,163,184,.08); border: 1px solid var(--borda); }
+.prev-resumo .dica { color: var(--suave); font-size: 11px; margin-top: 4px; }
+.prev-linha { margin-top: 8px; font-size: 12px; font-weight: 600; }
 </style>
 </head>
 <body>
@@ -83,11 +98,15 @@ h1 { font-size: 17px; font-weight: 700; margin: 0 0 6px; letter-spacing: -.01em;
 <div id="topo" class="painel">
   <h1>🌧️ Alagamentos · Rio</h1>
   <div class="status"><span class="pulso" id="pulso"></span><span id="status">Carregando…</span></div>
+  <button id="perto-btn">📍 Perto de mim</button>
+  <div id="perto"></div>
+  <div class="dica-mapa">Dica: clique com o botão direito no mapa para simular outro local.</div>
   <div class="contagem">
     <div class="card"><b id="n-baixo" style="color:var(--baixo)">–</b><span>Baixo</span></div>
     <div class="card"><b id="n-moderado" style="color:var(--moderado)">–</b><span>Moderado</span></div>
     <div class="card"><b id="n-alto" style="color:var(--alto)">–</b><span>Alto</span></div>
   </div>
+  <div id="prev-resumo" class="prev-resumo" style="display:none"></div>
   <p class="subtitulo">Mais chuva na última hora</p>
   <ul id="ranking"></ul>
 </div>
@@ -115,7 +134,7 @@ function popupHTML(p) {
     <div class="linha"><span>Chuva na última hora</span><b>${p.acumulado} mm</b></div>
     <div class="linha"><span>Limiar da estação</span><b>${p.limiar} mm</b></div>
     <div class="barra"><div style="width:${pct}%;background:${cor}"></div></div>
-    <span class="etiqueta" style="background:${cor}">Risco ${ROTULO[p.risco] || ''}</span></div>`;
+    <span class="etiqueta" style="background:${cor}">Risco ${ROTULO[p.risco] || ''}</span>${linhaPrevisao(p)}</div>`;
 }
 
 async function atualizar() {
@@ -133,6 +152,10 @@ async function atualizar() {
       m.bindPopup(popupHTML(e), { maxWidth: 290 });
       m.bindTooltip(e.nome, { direction: 'top', offset: [0, -8] });
       m.addTo(camada);
+      if (e.previsto_risco === 'moderado' || e.previsto_risco === 'alto') {
+        L.circleMarker([e.lat, e.lon], { radius: 17, color: CORES[e.previsto_risco], weight: 2,
+          dashArray: '4 4', fill: false, interactive: false }).addTo(camada);
+      }
       marcadores[e.id] = m;
     });
     if (primeiraVez && ESTACOES.length) {
@@ -150,6 +173,8 @@ async function atualizar() {
       `<li data-id="${e.id}"><span class="bolinha" style="background:${CORES[e.risco]}"></span>` +
       `<span class="nome">${e.nome}</span><span class="mm">${e.acumulado} mm</span></li>`).join('');
     document.getElementById('status').textContent = `Atualizado às ${d.atualizado} · ${d.modo}`;
+    resumoPrevisao();
+    avaliarPerto();
   } catch (err) {
     document.getElementById('status').textContent = 'Erro ao carregar dados. O servidor está ligado?';
   }
@@ -169,6 +194,134 @@ document.getElementById('tema').addEventListener('click', () => {
   document.body.classList.toggle('claro', tema === 'claro');
   document.getElementById('tema').textContent = tema === 'escuro' ? '☀️' : '🌙';
 });
+
+// ---------- Localização: risco perto de mim ----------
+let minhaPos = null, marcadorEu = null, circuloEu = null, linhaEu = null;
+let observando = null, centralizou = false;
+
+function distKm(lat1, lon1, lat2, lon2) {
+  const R = 6371, r = Math.PI / 180;
+  const dLat = (lat2 - lat1) * r, dLon = (lon2 - lon1) * r;
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * r) * Math.cos(lat2 * r) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+function km(d) { return d < 1 ? Math.round(d * 1000) + ' m' : d.toFixed(1).replace('.', ',') + ' km'; }
+
+function mostrarPerto(html, risco) {
+  const el = document.getElementById('perto');
+  el.innerHTML = html;
+  el.style.display = 'block';
+  el.style.borderLeftColor = risco ? CORES[risco] : 'var(--suave)';
+}
+
+function avaliarPerto() {
+  if (!minhaPos || !ESTACOES.length) return;
+  const ordem = { baixo: 0, moderado: 1, alto: 2 };
+  const lista = ESTACOES.map(e => ({ ...e, d: distKm(minhaPos.lat, minhaPos.lon, e.lat, e.lon) }))
+                        .sort((a, b) => a.d - b.d);
+  const perto = lista[0];
+  const raio = Math.max(3, perto.d + 0.5);
+  const vizinhas = lista.filter(e => e.d <= raio);
+  const pior = vizinhas.reduce((p, e) => (ordem[e.risco] > ordem[p.risco] ? e : p), perto);
+  const origem = minhaPos.simulada ? 'Local simulado' : 'Sua localização';
+  let titulo, texto;
+  if (pior.risco === 'alto') {
+    titulo = '⚠️ Risco alto de alagamento perto de você';
+    texto = `Estação ${pior.nome}, a ${km(pior.d)}: ${pior.acumulado} mm na última hora (limiar ${pior.limiar} mm). Evite ruas baixas, túneis e passagens que costumam alagar.`;
+  } else if (pior.risco === 'moderado') {
+    titulo = '🌧️ Atenção: chuva forte perto de você';
+    texto = `Estação ${pior.nome}, a ${km(pior.d)}: ${pior.acumulado} mm na última hora. Fique de olho e evite áreas que costumam alagar.`;
+  } else {
+    titulo = '✅ Tudo tranquilo perto de você';
+    texto = `Estação mais próxima: ${perto.nome}, a ${km(perto.d)}, com ${perto.acumulado} mm na última hora.`;
+  }
+  let dica = `${origem} · ${vizinhas.length} estação(ões) num raio de ${km(raio)}`;
+  if (perto.d > 8) dica = `${origem} · a estação mais próxima está a ${km(perto.d)}, então o risco pode não representar bem o seu local.`;
+  const piorPrev = vizinhas.reduce((p, e) => ((ordem[e.previsto_risco] ?? -1) > (ordem[p.previsto_risco] ?? -1) ? e : p), vizinhas[0]);
+  const prevTxt = piorPrev && piorPrev.previsto_risco ? linhaPrevisaoPerto(piorPrev) : '';
+  mostrarPerto(`<b class="titulo">${titulo}</b>${texto}${prevTxt}<div class="dica">${dica}</div>`, pior.risco);
+
+  if (linhaEu) map.removeLayer(linhaEu);
+  linhaEu = L.polyline([[minhaPos.lat, minhaPos.lon], [pior.lat, pior.lon]],
+    { color: CORES[pior.risco] || '#94a3b8', weight: 2, dashArray: '6 6', opacity: 0.85 }).addTo(map);
+}
+
+function definirPosicao(lat, lon, precisao, simulada) {
+  minhaPos = { lat, lon, simulada };
+  if (!marcadorEu) {
+    circuloEu = L.circle([lat, lon], { radius: precisao || 0, color: '#3b82f6', weight: 1, fillOpacity: 0.1 }).addTo(map);
+    marcadorEu = L.circleMarker([lat, lon], { radius: 8, color: '#ffffff', weight: 3,
+      fillColor: '#3b82f6', fillOpacity: 1, className: 'eu' }).addTo(map);
+    marcadorEu.bindTooltip('Você', { direction: 'top', offset: [0, -8] });
+  } else {
+    marcadorEu.setLatLng([lat, lon]);
+    circuloEu.setLatLng([lat, lon]).setRadius(precisao || 0);
+  }
+  if (!centralizou && !simulada) {
+    map.flyTo([lat, lon], 14, { duration: 1.2 });
+    centralizou = true;
+  }
+  avaliarPerto();
+}
+
+document.getElementById('perto-btn').addEventListener('click', () => {
+  const btn = document.getElementById('perto-btn');
+  if (!navigator.geolocation) {
+    return mostrarPerto('<b class="titulo">Localização indisponível</b>Seu navegador não permite localização.', null);
+  }
+  btn.textContent = '📍 Procurando você…';
+  if (observando !== null) navigator.geolocation.clearWatch(observando);
+  centralizou = false;
+  observando = navigator.geolocation.watchPosition(
+    pos => {
+      btn.textContent = '📍 Perto de mim';
+      definirPosicao(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy, false);
+    },
+    err => {
+      btn.textContent = '📍 Perto de mim';
+      mostrarPerto('<b class="titulo">Não consegui sua localização</b>' +
+        (err.code === 1 ? 'Você não deu permissão. Libere a localização nas configurações do navegador.'
+                        : 'Tente de novo daqui a pouco.'), null);
+    },
+    { enableHighAccuracy: true, maximumAge: 30000, timeout: 15000 });
+});
+
+map.on('contextmenu', ev => {
+  if (observando !== null) { navigator.geolocation.clearWatch(observando); observando = null; }
+  definirPosicao(ev.latlng.lat, ev.latlng.lng, 0, true);
+});
+
+// ---------- Previsão: próximas 3 horas ----------
+function textoPrevisao(e) {
+  if (!e.previsto_mm) return 'sem chuva prevista';
+  return `pico de ${e.previsto_mm} mm/h às ${e.previsto_hora} · risco ${ROTULO[e.previsto_risco].toLowerCase()}`;
+}
+function linhaPrevisao(e) {
+  if (!e.previsto_risco) return '';
+  const cor = e.previsto_risco === 'baixo' ? 'var(--suave)' : CORES[e.previsto_risco];
+  return `<div class="prev-linha" style="color:${cor}">⏳ Próximas 3h: ${textoPrevisao(e)}</div>`;
+}
+function linhaPrevisaoPerto(e) {
+  if (e.previsto_risco === 'baixo') {
+    return '<div class="prev-linha" style="color:var(--suave)">⏳ Próximas 3h: sem risco previsto</div>';
+  }
+  return `<div class="prev-linha" style="color:${CORES[e.previsto_risco]}">⏳ Próximas 3h: risco ` +
+    `${ROTULO[e.previsto_risco].toLowerCase()} previsto às ${e.previsto_hora} (${e.nome}, ${e.previsto_mm} mm/h)</div>`;
+}
+function resumoPrevisao() {
+  const el = document.getElementById('prev-resumo');
+  const comPrev = ESTACOES.filter(e => e.previsto_risco);
+  if (!comPrev.length) { el.style.display = 'none'; return; }
+  const al = comPrev.filter(e => e.previsto_risco === 'alto').length;
+  const mo = comPrev.filter(e => e.previsto_risco === 'moderado').length;
+  const nota = REPLAY ? 'No replay, a previsão usa a chuva que realmente caiu depois.'
+                      : 'Anel tracejado no mapa = risco previsto.';
+  el.style.display = 'block';
+  el.innerHTML = (al + mo === 0
+    ? '⏳ <b>Próximas 3h:</b> sem risco previsto'
+    : `⏳ <b>Próximas 3h:</b> <b style="color:${CORES.alto}">${al} alto</b> · ` +
+      `<b style="color:${CORES.moderado}">${mo} moderado</b>`) + `<div class="dica">${nota}</div>`;
+}
 
 const REPLAY = location.pathname.endsWith('/replay');
 let momentos = [], idx = 0, tocando = false, timer = null, momentoReplay = '';
