@@ -120,7 +120,7 @@ function popupHTML(p) {
 
 async function atualizar() {
   try {
-    const d = await (await fetch('api/risco')).json();
+    const d = await (await fetch(REPLAY ? 'api/replay?momento=' + encodeURIComponent(momentoReplay) : 'api/risco')).json();
     ESTACOES = d.estacoes.filter(e => e.lat != null && e.lon != null);
     camada.clearLayers();
     ESTACOES.forEach(e => {
@@ -170,8 +170,70 @@ document.getElementById('tema').addEventListener('click', () => {
   document.getElementById('tema').textContent = tema === 'escuro' ? '☀️' : '🌙';
 });
 
-atualizar();
-setInterval(atualizar, 60000);
+const REPLAY = location.pathname.endsWith('/replay');
+let momentos = [], idx = 0, tocando = false, timer = null, momentoReplay = '';
+
+function formatar(m) {
+  const [d, h] = m.split('T');
+  const [, mes, dia] = d.split('-');
+  return `${dia}/${mes} ${h.slice(0, 5)}`;
+}
+
+async function iniciarReplay() {
+  const css = document.createElement('style');
+  css.textContent = `
+    #replay { left: 50%; transform: translateX(-50%); bottom: 16px; padding: 12px 16px;
+      display: flex; align-items: center; gap: 12px; width: min(560px, calc(100% - 32px)); }
+    #replay button { background: var(--alto); color: #fff; border: 0; border-radius: 10px;
+      width: 40px; height: 40px; font-size: 15px; cursor: pointer; flex: none; }
+    #replay input { flex: 1; accent-color: var(--alto); }
+    #replay .hora { font-variant-numeric: tabular-nums; font-weight: 600; font-size: 14px;
+      min-width: 92px; text-align: right; }
+    .aviso { display: none; }`;
+  document.head.appendChild(css);
+  const barra = document.createElement('div');
+  barra.id = 'replay';
+  barra.className = 'painel';
+  barra.innerHTML = '<button id="play" title="Play/pausa">▶</button>' +
+    '<input id="tempo" type="range" min="0" value="0"><span class="hora" id="hora">–</span>';
+  document.body.appendChild(barra);
+
+  const info = await (await fetch('api/replay/momentos')).json();
+  momentos = info.momentos;
+  if (!momentos.length) {
+    document.getElementById('status').textContent = 'Sem dados de replay. Rode: python replay_baixar.py';
+    return;
+  }
+  const tempo = document.getElementById('tempo');
+  const play = document.getElementById('play');
+  tempo.max = momentos.length - 1;
+
+  const ir = async i => {
+    idx = i;
+    tempo.value = i;
+    momentoReplay = momentos[i];
+    document.getElementById('hora').textContent = formatar(momentos[i]);
+    await atualizar();
+  };
+  const pausar = () => { tocando = false; clearInterval(timer); play.textContent = '▶'; };
+
+  tempo.addEventListener('input', () => { pausar(); ir(+tempo.value); });
+  play.addEventListener('click', () => {
+    if (tocando) return pausar();
+    if (idx >= momentos.length - 1) ir(0);
+    tocando = true;
+    play.textContent = '❚❚';
+    timer = setInterval(() => { idx >= momentos.length - 1 ? pausar() : ir(idx + 1); }, 800);
+  });
+  ir(0);
+}
+
+if (REPLAY) {
+  iniciarReplay();
+} else {
+  atualizar();
+  setInterval(atualizar, 60000);
+}
 </script>
 </body>
 </html>

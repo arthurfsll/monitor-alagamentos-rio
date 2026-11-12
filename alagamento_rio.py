@@ -197,6 +197,41 @@ atualizar();
 setInterval(atualizar, 60000);
 </script></body></html>"""
 
+# ---------- Replay de eventos históricos ----------
+def risco_em(momento):
+    fim = datetime.fromisoformat(momento)
+    desde = (fim - timedelta(hours=1)).isoformat()
+    with conexao() as c:
+        linhas = c.execute("""
+            SELECT e.id, e.nome, e.lat, e.lon, e.limiar,
+                   COALESCE(SUM(l.mm), 0) AS acumulado
+            FROM estacoes e
+            LEFT JOIN leituras_replay l ON l.estacao_id = e.id
+                 AND l.horario > ? AND l.horario <= ?
+            WHERE e.lat IS NOT NULL AND e.lon IS NOT NULL
+            GROUP BY e.id""", (desde, fim.isoformat())).fetchall()
+    return [{**dict(r), "acumulado": round(r["acumulado"], 1),
+             "risco": classificar(r["acumulado"], r["limiar"])} for r in linhas]
+
+@app.get("/api/replay/momentos")
+def api_replay_momentos():
+    try:
+        with conexao() as c:
+            rows = c.execute("SELECT DISTINCT horario FROM leituras_replay ORDER BY horario").fetchall()
+        return {"momentos": [r[0] for r in rows]}
+    except sqlite3.OperationalError:
+        return {"momentos": []}
+
+@app.get("/api/replay")
+def api_replay(momento: str):
+    return {"atualizado": f"{momento[8:10]}/{momento[5:7]} {momento[11:16]}",
+            "modo": "Replay · temporal de 13–14/jan/2024",
+            "estacoes": risco_em(momento)}
+
+@app.get("/replay", response_class=HTMLResponse)
+def pagina_replay():
+    return open("mapa2d.html", encoding="utf-8").read()
+
 @app.get("/", response_class=HTMLResponse)
 def mapa():
     return open("mapa2d.html", encoding="utf-8").read()
