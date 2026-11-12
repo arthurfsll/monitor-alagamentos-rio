@@ -199,6 +199,10 @@ setInterval(atualizar, 60000);
 
 @app.get("/", response_class=HTMLResponse)
 def mapa():
+    return open("mapa3d.html", encoding="utf-8").read()
+
+@app.get("/2d", response_class=HTMLResponse)
+def mapa2d():
     return MAPA_HTML
 
 if __name__ == "__main__":

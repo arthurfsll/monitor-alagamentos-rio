@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Monitor de Alagamentos Rio 3D</title>
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<style>
+  html, body, #mapa { height: 100%; margin: 0; }
+  .painel { position: absolute; z-index: 1; background: rgba(255,255,255,.92);
+    padding: 10px 14px; border-radius: 10px; font: 14px system-ui, sans-serif;
+    box-shadow: 0 2px 8px rgba(0,0,0,.25); }
+  #info { top: 10px; left: 10px; }
+  #legenda { bottom: 30px; left: 10px; }
+  .cor { display: inline-block; width: 12px; height: 12px; border-radius: 3px;
+    margin-right: 6px; vertical-align: middle; }
+</style>
+</head>
+<body>
+<div id="mapa"></div>
+<div id="info" class="painel"><b>Monitor de Alagamentos Rio</b><br><span id="status">Carregando…</span></div>
+<div id="legenda" class="painel">
+  <div><span class="cor" style="background:#2e7d32"></span>Baixo</div>
+  <div><span class="cor" style="background:#f9a825"></span>Moderado</div>
+  <div><span class="cor" style="background:#c62828"></span>Alto</div>
+  <div style="margin-top:6px;font-size:12px;color:#555">Altura da coluna: chuva da última hora<br>em relação ao limiar da estação</div>
+</div>
+<script>
+const CORES = { baixo: '#2e7d32', moderado: '#f9a825', alto: '#c62828' };
+
+function circulo(lon, lat, raioM, lados) {
+  const pts = [];
+  const dLat = raioM / 111320;
+  const dLon = raioM / (111320 * Math.cos(lat * Math.PI / 180));
+  for (let i = 0; i <= lados; i++) {
+    const a = (i / lados) * 2 * Math.PI;
+    pts.push([lon + dLon * Math.cos(a), lat + dLat * Math.sin(a)]);
+  }
+  return [pts];
+}
+
+function paraGeoJSON(estacoes) {
+  return {
+    type: 'FeatureCollection',
+    features: estacoes.map(e => ({
+      type: 'Feature',
+      geometry: { type: 'Polygon', coordinates: circulo(e.lon, e.lat, 300, 24) },
+      properties: {
+        nome: e.nome, acumulado: e.acumulado, limiar: e.limiar, risco: e.risco,
+        cor: CORES[e.risco] || '#888888',
+        altura: 100 + Math.min(e.acumulado / e.limiar, 1.5) * 1500
+      }
+    }))
+  };
+}
+
+const map = new maplibregl.Map({
+  container: 'mapa',
+  style: {
+    version: 8,
+    sources: {
+      osm: { type: 'raster', tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
+             tileSize: 256, attribution: '© OpenStreetMap' },
+      relevo: { type: 'raster-dem', encoding: 'terrarium', tileSize: 256, maxzoom: 15,
+                tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'] },
+      sombra: { type: 'raster-dem', encoding: 'terrarium', tileSize: 256, maxzoom: 15,
+                tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'] }
+    },
+    layers: [
+      { id: 'osm', type: 'raster', source: 'osm' },
+      { id: 'sombra', type: 'hillshade', source: 'sombra', paint: { 'hillshade-exaggeration': 0.5 } }
+    ],
+    terrain: { source: 'relevo', exaggeration: 1.5 }
+  },
+  center: [-43.35, -22.93], zoom: 10.5, pitch: 60, bearing: -20, maxPitch: 85
+});
+map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }));
+
+async function atualizar() {
+  try {
+    const d = await (await fetch('api/risco')).json();
+    const validas = d.estacoes.filter(e => e.lat != null && e.lon != null);
+    map.getSource('estacoes').setData(paraGeoJSON(validas));
+    document.getElementById('status').textContent = `Atualizado às ${d.atualizado} · ${d.modo}`;
+  } catch (err) {
+    document.getElementById('status').textContent = 'Erro ao carregar dados';
+  }
+}
+
+map.on('load', async () => {
+  map.addSource('estacoes', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+  map.addLayer({
+    id: 'colunas', type: 'fill-extrusion', source: 'estacoes',
+    paint: {
+      'fill-extrusion-color': ['get', 'cor'],
+      'fill-extrusion-height': ['get', 'altura'],
+      'fill-extrusion-base': 0,
+      'fill-extrusion-opacity': 0.85
+    }
+  });
+  map.on('click', 'colunas', ev => {
+    const p = ev.features[0].properties;
+    new maplibregl.Popup().setLngLat(ev.lngLat)
+      .setHTML(`<b>${p.nome}</b><br>Chuva na última hora: ${p.acumulado} mm<br>Limiar: ${p.limiar} mm<br>Risco: ${p.risco}`)
+      .addTo(map);
+  });
+  map.on('mouseenter', 'colunas', () => { map.getCanvas().style.cursor = 'pointer'; });
+  map.on('mouseleave', 'colunas', () => { map.getCanvas().style.cursor = ''; });
+  await atualizar();
+  setInterval(atualizar, 60000);
+});
+</script>
+</body>
+</html>
